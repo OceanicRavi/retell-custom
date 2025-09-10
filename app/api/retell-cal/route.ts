@@ -1,64 +1,66 @@
+// app/api/retell-cal/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { Retell } from "retell-sdk";
 
-export const runtime = "nodejs"; // Node runtime on Vercel
+export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    // 1) Verify Retell signature (so only Retell can hit this)
-    const signature = req.headers.get("x-retell-signature") || "";
-    const raw = await req.text();
-    const okSig = Retell.verify(raw, process.env.RETELL_API_KEY!, signature);
-    if (!okSig) {
-      return NextResponse.json({ ok: false, error: "Invalid signature" }, { status: 401 });
-    }
-
-    // 2) Parse args Retell sent
-    const { args = {} } = JSON.parse(raw) ?? {};
-    const { eventTypeId, start, name, email, timeZone, metadata } = args;
-
-    // Minimal validation (Cal needs eventTypeId, attendee, and UTC start)
-    if (!eventTypeId || !start || !email) {
-      return NextResponse.json(
-        { ok: false, error: "Missing: eventTypeId, start (UTC), or email" },
-        { status: 200 }
-      );
-    }
-
-    // 3) Build Cal.com payload (API v2 uses `attendee` object)
+    console.log("📥 Received Retell webhook");
+    
+    // Get the payload
+    const payload = await req.json();
+    console.log("📋 Full payload:", JSON.stringify(payload, null, 2));
+    
+    // Extract args from Book-Meeting-with-Note
+    const args = payload.args;
+    console.log("🎯 Extracted args:", JSON.stringify(args, null, 2));
+    
+    // Convert to Cal.com format
     const calPayload = {
-      start, // must be UTC ISO like "2025-09-12T02:00:00Z"
+      start: args.startTime,
       attendee: {
-        name: name || "Guest",
-        email,
-        timeZone: timeZone || "Pacific/Auckland",
+        name: args.name,
+        email: args.email,
+        timeZone: args.timeZone
       },
-      eventTypeId: Number(eventTypeId),
-      metadata: metadata || {},
+      eventTypeId: Number(process.env.CAL_EVENT_TYPE_ID || args.eventTypeId),
+      metadata: {
+        ...args.metadata,
+        phone: args.phoneNumber,
+        bookingFields: args.bookingFieldsResponses,
+        source: "retell-ai"
+      }
     };
-
-    // 4) Call Cal.com
-    const res = await fetch("https://api.cal.com/v2/bookings", {
+    
+    console.log("📤 Sending to Cal.com:", JSON.stringify(calPayload, null, 2));
+    
+    // Send to Cal.com
+    const response = await fetch("https://api.cal.com/v2/bookings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.CAL_API_KEY}`,
-        "cal-api-version": "2024-08-13", // required by v2
+        "Authorization": `Bearer ${process.env.CAL_API_KEY}`,
+        "cal-api-version": "2024-08-13"
       },
-      body: JSON.stringify(calPayload),
+      body: JSON.stringify(calPayload)
     });
-
-    const data = await res.json().catch(() => ({}));
-
-    // 5) Always return a handled JSON back to Retell
-    if (!res.ok) {
-      return NextResponse.json(
-        { ok: false, status: res.status, error: data },
-        { status: 200 }
-      );
+    
+    const result = await response.json();
+    console.log("✅ Cal.com response:", response.status, JSON.stringify(result, null, 2));
+    
+    // Send response back to Retell
+    if (response.ok) {
+      const message = `Perfect! Your ${args.metadata?.car_selected || 'ride'} is booked from ${args.metadata?.pickup_location || 'pickup'} to ${args.metadata?.destination || 'destination'} for ${args.startTime}. Booking confirmed!`;
+      console.log("📞 Retell response:", message);
+      return NextResponse.json(message);
+    } else {
+      const errorMessage = "Sorry, there was an issue with the booking. Please try again.";
+      console.log("❌ Retell error response:", errorMessage);
+      return NextResponse.json(errorMessage);
     }
-    return NextResponse.json({ ok: true, booking: data }, { status: 200 });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "Unknown" }, { status: 200 });
+    
+  } catch (error) {
+    console.error("💥 Error:", error);
+    return NextResponse.json("I'm having technical difficulties. Please try again.");
   }
 }
