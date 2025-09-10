@@ -3,14 +3,6 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-// Add this GET method for testing
-export async function GET() {
-  return NextResponse.json({ 
-    message: "Retell-Cal API is working",
-    timestamp: new Date().toISOString()
-  });
-}
-
 export async function POST(req: NextRequest) {
   try {
     console.log("📥 Received Retell webhook");
@@ -23,7 +15,16 @@ export async function POST(req: NextRequest) {
     const args = payload.args;
     console.log("🎯 Extracted args:", JSON.stringify(args, null, 2));
     
-    // Convert to Cal.com format
+    // Convert to Cal.com format - use bookingFieldsResponses for custom fields
+    const bookingDetails = `RIDE BOOKING
+Customer: ${args.name}
+Phone: ${args.phoneNumber}
+Vehicle: ${args.metadata?.car_selected || "Standard"}
+Pickup: ${args.metadata?.pickup_location || "TBD"}
+Drop-off: ${args.metadata?.destination || "TBD"}
+Notes: ${args.metadata?.special_attention || "None"}
+Source: Retell AI`;
+
     const calPayload = {
       start: args.startTime,
       attendee: {
@@ -32,11 +33,8 @@ export async function POST(req: NextRequest) {
         timeZone: args.timeZone
       },
       eventTypeId: Number(process.env.CAL_EVENT_TYPE_ID || args.eventTypeId),
-      metadata: {
-        ...args.metadata,
-        phone: args.phoneNumber,
-        bookingFields: args.bookingFieldsResponses,
-        source: "retell-ai"
+      bookingFieldsResponses: {
+        notes: bookingDetails
       }
     };
     
@@ -54,7 +52,7 @@ export async function POST(req: NextRequest) {
     });
     
     const result = await response.json();
-    console.log("✅ Cal.com response:", response.status, JSON.stringify(result, null, 2));
+    console.log("✅ Cal.com response:", response.status);
     
     // Send response back to Retell
     if (response.ok) {
@@ -62,6 +60,8 @@ export async function POST(req: NextRequest) {
       console.log("📞 Retell response:", message);
       return NextResponse.json(message);
     } else {
+      // Log the error but don't expose it to Retell
+      console.log("❌ Cal.com error:", JSON.stringify(result, null, 2));
       const errorMessage = "Sorry, there was an issue with the booking. Please try again.";
       console.log("❌ Retell error response:", errorMessage);
       return NextResponse.json(errorMessage);
