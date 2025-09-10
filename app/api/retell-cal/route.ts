@@ -3,6 +3,14 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+// Add this GET method for testing
+export async function GET() {
+  return NextResponse.json({ 
+    message: "Retell-Cal API is working",
+    timestamp: new Date().toISOString()
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     console.log("📥 Received Retell webhook");
