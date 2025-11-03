@@ -84,7 +84,7 @@ Source: Retell AI${needsDateConfirmation ? '\nRequested: ' + args.startTime : ''
       start: utcStartTime, // Use converted UTC time (or dummy if needed)
       attendee: {
         name: args.name,
-        email: args.email,
+        email: args.email || "Blackstonechauffeur@gmail.com",
         timeZone: args.timeZone
       },
       eventTypeId: Number(process.env.CAL_EVENT_TYPE_ID || args.eventTypeId),
